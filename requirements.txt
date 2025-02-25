@@ -1,0 +1,9 @@
+numpy
+matplotlib
+seaborn
+Pillow
+streamlit>=1.15
+pandas>=1.3
+requests>=2.25
+google-auth>=2.6
+gspread>=5.7
