@@ -16,7 +16,7 @@ import gspread
 # baseballmetricsモジュール（成績計算関数群）をインポート
 from baseballmetrics import *  
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=86640)
 def load_data_from_google_spreadsheet():
     """
     st.secretsに設定したGoogleのサービスアカウント情報と
