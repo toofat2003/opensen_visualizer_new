@@ -79,12 +79,16 @@ def compute_batter_stats(df):
             "二塁打": countpr(group, 'Double'),
             "三塁打": countpr(group, 'Triple'),
             "本塁打": countpr(group, 'HomeRun'),
+            "打点": int(group.RunsScored.sum()),
+            "犠打": countpr(group.query('TaggedHitType == "GroundBall"'), 'Sacrifice'),
+            "犠飛": countpr(group.query('TaggedHitType == "FlyBall"'), 'Sacrifice'),
             "四球": countpr(group, 'Walk'),
             "三振": countpr(group, 'Strikeout'),
             "打率": BA(group),
             "出塁率": OBP(group,mc=False),
             "長打率": SA(group),
-            "OPS": OPS(group)
+            "OPS": OPS(group),
+            "三振率": round(countpr(group, 'Strikeout') / seki(group)*100,1),
         }
         results.append(stats)
     
@@ -113,6 +117,8 @@ def calculate_stats_pitcher(sheet_0222):
     for df in sheet_0222.groupby('Pitcher'):
         result_moto = []
         df_1 = df[1]
+        num_runner = countpr(df_1,'Single') + countpr(df_1,'Double') + countpr(df_1,'Triple') + countpr(df_1,'HomeRun') + countpr(df_1,'Walk') + countpr(df_1,'HitByPitch')
+        df_pitches = df_1.dropna(subset=['PitchofPA'])
         ph = ['InPlay', 'HitByPitch'] # 変数
         kb = ['Strikeout', 'Walk'] # 変数
         df_kekka = df_1.query('PitchCall == @ph or KorBB == @kb')
@@ -125,6 +131,7 @@ def calculate_stats_pitcher(sheet_0222):
         result_moto.append(BA(df_1,mc=True)[2])
         result_moto.append(len(df_1.query('KorBB == "Strikeout"')))
         result_moto.append(len(df_1.query('KorBB == "Walk"')))
+        result_moto.append(round(len(df_pitches.query('PitchCall != "BallCalled"'))/len(df_pitches),2))
         result_moto.append(round((len(df_1.query('KorBB == "Strikeout"')) - len(df_1.query('KorBB == "Walk"'))) / seki(df_1)*100,1))
         result_moto.append(BA(df_1,mc=False))
         result_moto.append(OPS(df_1))
@@ -133,15 +140,20 @@ def calculate_stats_pitcher(sheet_0222):
         result_moto.append(round(len(df_1.query('TaggedHitType == "GroundBall" and PitchCall == "InPlay"')) / seki(df_1)*100,1))
         result_moto.append(round(len(df_1.query('TaggedHitType == "LineDrive" and PitchCall == "InPlay"')) / seki(df_1)*100,1))
         result_moto.append(round(len(df_1.query('TaggedHitType == "FlyBall" and PitchCall == "InPlay"')) / seki(df_1)*100,1))
+        result_moto.append(round(num_runner/ini,2))
 
         result.append(result_moto)
-    result_final = pd.DataFrame(result, columns = ['Pitcher', '回', '打者', '点','安','K', 'BB', 'K-BB%','被打率','被OPS','K%','BB%','GB%','LD%','FB%'])
+    result_final = pd.DataFrame(result, columns = ['Pitcher', '回', '打者', '点','安','K', 'BB', 'ストライク率','K-BB%','被打率','被OPS','K%','BB%','GB%','LD%','FB%','WHIP'])
     return result_final
 
 
 def main():
     st.title("オープン戦成績")
     st.write("現在の対象試合:2025春 日付があっていない場合は左のバーにあるデータ更新ボタンを押してください。")
+    st.subheader("操作方法")
+    st.write("左のサイドバーで、データ種別（打者成績 or 投手成績）やGameLevel（A戦 or B戦）を選択してください。")
+    st.write("また、日付範囲をスライダーで選択することで、指定した日付範囲のデータを表示できます。")
+    st.write("※初回読み込みには1分程度かかります。原因調査中です。")
     
     # ここでGoogleスプレッドシートからデータを取得し、st.cache_dataでキャッシュ
     df = load_data_from_google_spreadsheet()
