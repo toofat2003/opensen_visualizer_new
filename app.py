@@ -95,7 +95,7 @@ def compute_batter_stats(df):
     # 結果をDataFrameに変換
     result_df = pd.DataFrame(results)
     # 表示順を整える
-    result_df = result_df[["打者",  "打率", "出塁率", "長打率", "OPS","打席", "打数", "安打","単打", "二塁打", "三塁打", "本塁打", "四球", "三振",]].sort_values("OPS", ascending=False)
+    result_df = result_df[["打者",  "打率", "打点","出塁率", "長打率", "OPS","打席", "打数", "安打","単打", "二塁打", "三塁打", "本塁打", "四球", "三振","犠打","犠飛","三振率"]].sort_values("OPS", ascending=False)
     return result_df
 
 def calculate_stats_pitcher(sheet_0222):
