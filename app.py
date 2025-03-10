@@ -15,42 +15,60 @@ import gspread
 
 # baseballmetricsモジュール（成績計算関数群）をインポート
 from baseballmetrics import *  
+import glob
+#@st.cache_data(ttl=86640)
+#def load_data_from_google_spreadsheet():
+#    """
+#    st.secretsに設定したGoogleのサービスアカウント情報と
+#    スプレッドシートキーをもとに、対象のスプレッドシートの全ワークシートの内容を
+#    DataFrameに読み込み、結合して返す関数。
+#    """
+#    # Secretsから認証情報とスプレッドシートキーを取得
+#    credentials_info = st.secrets["gcp_service_account"]
+#    spreadsheet_key = st.secrets["gspread"]["spreadsheet_key"]
+#    scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+#    credentials = service_account.Credentials.from_service_account_info(credentials_info, scopes=scopes)
+#    
+#    # gspreadを使ってスプレッドシートに接続
+#    gc = gspread.authorize(credentials)
+#    try:
+#        sh = gc.open_by_key(spreadsheet_key)
+#    except Exception as e:
+#        st.error("スプレッドシートの読み込みに失敗しました。Secretsの設定とスプレッドシートキーを確認してください。")
+#        st.exception(e)
+#        return None
+#
+#    dfs = []
+#    # 各ワークシートのデータを取得してDataFrameに変換
+#    for worksheet in sh.worksheets():
+#        data = worksheet.get_all_values()
+#        if len(data) < 2:
+#            continue  # ヘッダーのみまたは空のシートはスキップ
+#        df_sheet = pd.DataFrame(data[1:], columns=data[0])
+#        dfs.append(df_sheet)
+#    if dfs:
+#        combined_df = pd.concat(dfs, ignore_index=True)
+#        return combined_df
+#    else:
+#        return None
 
 @st.cache_data(ttl=86640)
-def load_data_from_google_spreadsheet():
+def load_data_from_csv():
     """
-    st.secretsに設定したGoogleのサービスアカウント情報と
-    スプレッドシートキーをもとに、対象のスプレッドシートの全ワークシートの内容を
-    DataFrameに読み込み、結合して返す関数。
+    ローカルのCSVファイルからデータを読み込む関数
     """
-    # Secretsから認証情報とスプレッドシートキーを取得
-    credentials_info = st.secrets["gcp_service_account"]
-    spreadsheet_key = st.secrets["gspread"]["spreadsheet_key"]
-    scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
-    credentials = service_account.Credentials.from_service_account_info(credentials_info, scopes=scopes)
-    
-    # gspreadを使ってスプレッドシートに接続
-    gc = gspread.authorize(credentials)
     try:
-        sh = gc.open_by_key(spreadsheet_key)
+        # CSVファイルのパスを指定（複数ある場合はリストで）
+        S23 = glob.glob(f'data/*.csv')
+        df23s = pd.DataFrame()
+        for fl in S23:
+            df0 = pd.read_csv(fl, encoding = 'utf-8-sig')
+            df23s = pd.concat([df23s, df0]).reset_index(drop = True)
+        return df23s
     except Exception as e:
-        st.error("スプレッドシートの読み込みに失敗しました。Secretsの設定とスプレッドシートキーを確認してください。")
-        st.exception(e)
+        st.error(f"CSVファイルの読み込みに失敗しました: {e}")
         return None
-
-    dfs = []
-    # 各ワークシートのデータを取得してDataFrameに変換
-    for worksheet in sh.worksheets():
-        data = worksheet.get_all_values()
-        if len(data) < 2:
-            continue  # ヘッダーのみまたは空のシートはスキップ
-        df_sheet = pd.DataFrame(data[1:], columns=data[0])
-        dfs.append(df_sheet)
-    if dfs:
-        combined_df = pd.concat(dfs, ignore_index=True)
-        return combined_df
-    else:
-        return None
+    
 
 def compute_batter_stats(df):
     """
@@ -156,7 +174,7 @@ def main():
     st.write("※初回読み込みには1分程度かかります。原因調査中です。")
     
     # ここでGoogleスプレッドシートからデータを取得し、st.cache_dataでキャッシュ
-    df = load_data_from_google_spreadsheet()
+    df = load_data_from_csv()
     if df is None:
         st.error("データが取得できませんでした。")
         return
