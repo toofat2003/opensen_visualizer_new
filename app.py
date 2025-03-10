@@ -265,12 +265,13 @@ def compute_batter_stats_optimized(df):
 @st.cache_data(ttl=86400)
 def calculate_stats_pitcher_optimized(df):
     """
-    投手成績を計算する関数（最適化版）
+    投手成績を計算する関数（超高速化版）- ベクトル化処理とクエリの最小化
     """
     if df is None or df.empty:
         return pd.DataFrame()
     
     def calculate_inning_from_float(num):
+        """イニング数を文字列表記に変換"""
         try:
             seisu = int(num)
             shosu = round(num - seisu, 2)
@@ -283,19 +284,82 @@ def calculate_stats_pitcher_optimized(df):
             return str(seisu) + ' ' + shosu
         except:
             return '-'
-
+    
+    # 最初に必要な列だけを抽出（メモリ使用量削減）
+    needed_columns = ['Pitcher', 'PitchCall', 'KorBB', 'PlayResult', 'TaggedHitType', 
+                      'OutsOnPlay', 'RunsScored', 'PitchofPA', 'ExitSpeed', 'Angle', 'Direction']
+    
+    # 存在する列だけを選択
+    available_cols = [col for col in needed_columns if col in df.columns]
+    df_slim = df[available_cols].copy()
+    
+    # データフレームに必要な条件フラグを一度に追加（ベクトル化処理）
+    ph = ["InPlay", "HitByPitch"]
+    kb = ["Strikeout", "Walk"]
+    
+    # 条件マスクを作成
+    if 'PitchCall' in df_slim.columns and 'KorBB' in df_slim.columns:
+        df_slim['is_plate_appearance'] = df_slim['PitchCall'].isin(ph) | df_slim['KorBB'].isin(kb)
+        df_slim['is_strikeout'] = df_slim['KorBB'] == "Strikeout"
+        df_slim['is_walk'] = df_slim['KorBB'] == "Walk"
+        df_slim['is_hit_by_pitch'] = df_slim['PitchCall'] == "HitByPitch"
+    else:
+        df_slim['is_plate_appearance'] = False
+        df_slim['is_strikeout'] = False
+        df_slim['is_walk'] = False
+        df_slim['is_hit_by_pitch'] = False
+    
+    if 'PlayResult' in df_slim.columns:
+        df_slim['is_single'] = df_slim['PlayResult'] == "Single"
+        df_slim['is_double'] = df_slim['PlayResult'] == "Double"
+        df_slim['is_triple'] = df_slim['PlayResult'] == "Triple"
+        df_slim['is_homerun'] = df_slim['PlayResult'] == "HomeRun"
+    else:
+        df_slim['is_single'] = False
+        df_slim['is_double'] = False
+        df_slim['is_triple'] = False
+        df_slim['is_homerun'] = False
+    
+    if 'PitchCall' in df_slim.columns:
+        df_slim['is_in_play'] = df_slim['PitchCall'] == "InPlay"
+        df_slim['is_strike'] = df_slim['PitchCall'] != "BallCalled"
+    else:
+        df_slim['is_in_play'] = False
+        df_slim['is_strike'] = False
+    
+    # 打球タイプの条件
+    if 'TaggedHitType' in df_slim.columns and 'PitchCall' in df_slim.columns:
+        df_slim['is_ground_ball'] = (df_slim['TaggedHitType'] == "GroundBall") & (df_slim['PitchCall'] == "InPlay")
+        df_slim['is_line_drive'] = (df_slim['TaggedHitType'] == "LineDrive") & (df_slim['PitchCall'] == "InPlay")
+        df_slim['is_fly_ball'] = (df_slim['TaggedHitType'] == "FlyBall") & (df_slim['PitchCall'] == "InPlay")
+    else:
+        df_slim['is_ground_ball'] = False
+        df_slim['is_line_drive'] = False
+        df_slim['is_fly_ball'] = False
+    
+    # 打席データのみに絞る
+    plate_app_df = df_slim[df_slim['is_plate_appearance']]
+    
+    # 空のデータフレームの場合は、空の結果を返す
+    if plate_app_df.empty:
+        return pd.DataFrame()
+    
+    # 結果を格納するリスト
     result = []
     
     # 各投手のデータを処理
-    for pitcher_name, pitcher_df in df.groupby('Pitcher'):
+    for pitcher_name, pitcher_df in df_slim.groupby('Pitcher'):
         try:
-            # 安全なデータ変換
-            pitcher_df = pitcher_df.copy()
+            # 打席のあるデータだけに絞る
+            pa_pitcher_df = pitcher_df[pitcher_df['is_plate_appearance']]
             
-            # アウトカウントと得点の処理（エラーを回避）
+            if pa_pitcher_df.empty:
+                continue
+            
+            # アウトカウントと得点の処理
             try:
-                outs = pitcher_df['OutsOnPlay'].fillna(0).astype(int).sum()
-                strikeouts = len(pitcher_df.query('KorBB == "Strikeout"'))
+                outs = pitcher_df['OutsOnPlay'].fillna(0).astype(int).sum() if 'OutsOnPlay' in pitcher_df.columns else 0
+                strikeouts = pitcher_df['is_strikeout'].sum()
                 total_outs = outs + strikeouts
                 ini = total_outs / 3
                 ini_str = calculate_inning_from_float(ini)
@@ -305,44 +369,58 @@ def calculate_stats_pitcher_optimized(df):
                 ini_str = "-"
             
             # 投球データの処理
-            df_pitches = pitcher_df.dropna(subset=['PitchofPA'])
+            df_pitches = pitcher_df.dropna(subset=['PitchofPA']) if 'PitchofPA' in pitcher_df.columns else pd.DataFrame()
             total_pitches = len(df_pitches) if not df_pitches.empty else 0
             
-            # 各種ヒット数
-            ph = ['InPlay', 'HitByPitch']
-            kb = ['Strikeout', 'Walk']
-            df_kekka = pitcher_df.query('PitchCall == @ph or KorBB == @kb')
-            
             # 三振と四球
-            strikeouts = len(pitcher_df.query('KorBB == "Strikeout"'))
-            walks = len(pitcher_df.query('KorBB == "Walk"'))
+            strikeouts = pitcher_df['is_strikeout'].sum()
+            walks = pitcher_df['is_walk'].sum()
             
             # 打席数と得点
-            plate_appearances = seki(pitcher_df)
-            runs = pitcher_df['RunsScored'].fillna(0).astype(int).sum()
+            plate_appearances = pa_pitcher_df.shape[0]
+            runs = pitcher_df['RunsScored'].fillna(0).astype(int).sum() if 'RunsScored' in pitcher_df.columns else 0
             
             # ストライク率
-            strike_rate = round(len(df_pitches.query('PitchCall != "BallCalled"')) / total_pitches, 2) if total_pitches > 0 else 0
+            strikes = df_pitches['is_strike'].sum() if not df_pitches.empty and 'is_strike' in df_pitches.columns else 0
+            strike_rate = round(strikes / total_pitches, 2) if total_pitches > 0 else 0
             
             # K-BB%
             k_bb_pct = round((strikeouts - walks) / plate_appearances * 100, 1) if plate_appearances > 0 else 0
             
-            # 被安打率とOPS
-            batting_avg = BA(pitcher_df, mc=False)
-            ops = OPS(pitcher_df)
+            # 被安打率
+            hits = (pa_pitcher_df['is_single'].sum() + pa_pitcher_df['is_double'].sum() + 
+                    pa_pitcher_df['is_triple'].sum() + pa_pitcher_df['is_homerun'].sum())
+            
+            at_bats = plate_appearances - walks - pa_pitcher_df['is_hit_by_pitch'].sum()
+            batting_avg = round(hits / at_bats, 3) if at_bats > 0 else np.nan
+            
+            # 被OPS計算
+            # 出塁率
+            on_base = hits + walks + pa_pitcher_df['is_hit_by_pitch'].sum()
+            obp = round(on_base / plate_appearances, 3) if plate_appearances > 0 else np.nan
+            
+            # 長打率
+            total_bases = (pa_pitcher_df['is_single'].sum() + 
+                          (2 * pa_pitcher_df['is_double'].sum()) + 
+                          (3 * pa_pitcher_df['is_triple'].sum()) + 
+                          (4 * pa_pitcher_df['is_homerun'].sum()))
+            slg = round(total_bases / at_bats, 3) if at_bats > 0 else np.nan
+            
+            # OPS
+            ops = round(obp + slg, 3) if not (np.isnan(obp) or np.isnan(slg)) else np.nan
             
             # K%, BB%, 打球分布
             k_pct = round(strikeouts / plate_appearances * 100, 1) if plate_appearances > 0 else 0
             bb_pct = round(walks / plate_appearances * 100, 1) if plate_appearances > 0 else 0
             
-            gb_pct = round(len(pitcher_df.query('TaggedHitType == "GroundBall" and PitchCall == "InPlay"')) / plate_appearances * 100, 1) if plate_appearances > 0 else 0
-            ld_pct = round(len(pitcher_df.query('TaggedHitType == "LineDrive" and PitchCall == "InPlay"')) / plate_appearances * 100, 1) if plate_appearances > 0 else 0
-            fb_pct = round(len(pitcher_df.query('TaggedHitType == "FlyBall" and PitchCall == "InPlay"')) / plate_appearances * 100, 1) if plate_appearances > 0 else 0
+            gb_pct = round(pitcher_df['is_ground_ball'].sum() / plate_appearances * 100, 1) if plate_appearances > 0 else 0
+            ld_pct = round(pitcher_df['is_line_drive'].sum() / plate_appearances * 100, 1) if plate_appearances > 0 else 0
+            fb_pct = round(pitcher_df['is_fly_ball'].sum() / plate_appearances * 100, 1) if plate_appearances > 0 else 0
             
             # 走者数を計算
-            num_runner = (countpr(pitcher_df, 'Single') + countpr(pitcher_df, 'Double') + 
-                          countpr(pitcher_df, 'Triple') + countpr(pitcher_df, 'HomeRun') + 
-                          countpr(pitcher_df, 'Walk') + countpr(pitcher_df, 'HitByPitch'))
+            num_runner = (pa_pitcher_df['is_single'].sum() + pa_pitcher_df['is_double'].sum() + 
+                          pa_pitcher_df['is_triple'].sum() + pa_pitcher_df['is_homerun'].sum() + 
+                          walks + pa_pitcher_df['is_hit_by_pitch'].sum())
             
             # WHIP
             whip = round(num_runner / ini, 2) if ini > 0 else 0
@@ -350,7 +428,7 @@ def calculate_stats_pitcher_optimized(df):
             # 結果を配列に追加
             pitcher_stats = [
                 pitcher_name, ini_str, plate_appearances, runs, 
-                BA(pitcher_df, mc=True)[2], strikeouts, walks, strike_rate, 
+                hits, strikeouts, walks, strike_rate, 
                 k_bb_pct, batting_avg, ops, k_pct, bb_pct, 
                 gb_pct, ld_pct, fb_pct, whip
             ]
