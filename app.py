@@ -3,7 +3,7 @@ import pandas as pd
 import glob
 import time
 import base64
-from datetime import datetime
+from datetime import datetime, date
 
 # baseballmetricsモジュール（成績計算関数群）をインポート
 from baseballmetrics import *
@@ -13,11 +13,6 @@ from baseballmetrics import *
 def load_data_from_csv_files():
     """
     ローカルのCSVファイルからデータを効率的に読み込む関数
-    
-    改善点:
-    - 複数ファイルを一度にリスト化してから結合
-    - データ型を事前に指定
-    - エラーハンドリングの改善
     """
     try:
         start_time = time.time()
@@ -82,8 +77,18 @@ def filter_data(df, level_filter, date_range, side_filter, team_filter, data_typ
         df = df[df["Level"].isin(level_filter)]
     
     # 日付でのフィルタリング
-    if date_range:
-        df = df[(df["Date"] >= date_range[0]) & (df["Date"] <= date_range[1])]
+    if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
+        try:
+            # datetime.date型からpandas datetime64に変換
+            start_date = pd.Timestamp(date_range[0])
+            end_date = pd.Timestamp(date_range[1])
+            
+            # 比較前にデータが存在し、適切な型であることを確認
+            if "Date" in df.columns and not df["Date"].empty:
+                # 日付の範囲でフィルタリング
+                df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
+        except Exception as e:
+            st.warning(f"日付フィルタリング中にエラーが発生しました: {e}")
     
     # 投手/打者によるフィルタリング
     if data_type == "打者成績":
@@ -106,74 +111,70 @@ def filter_data(df, level_filter, date_range, side_filter, team_filter, data_typ
 def compute_batter_stats_optimized(df):
     """
     打者成績を計算する関数（最適化版）
-    
-    改善点:
-    - groupbyとagg関数を活用
-    - 不要なデータコピーを削除
-    - 処理を関数化して再利用性を向上
     """
     if df is None or df.empty:
         return pd.DataFrame()
         
-    # チームフィルターは上流で適用するため、ここでは削除
-    # df = df.query('BatterTeam == "TOK"').reset_index(drop=True)
-    
     results = []
     # 各打者ごとの統計を計算
     for batter, group in df.groupby("Batter"):
-        # 各統計を一度だけ計算
-        plate_appearances = seki(group)
-        at_bats = dasu(group)
-        
-        # 各種ヒット数を計算
-        single = countpr(group, 'Single')
-        double = countpr(group, 'Double')
-        triple = countpr(group, 'Triple')
-        homerun = countpr(group, 'HomeRun')
-        hits = single + double + triple + homerun
-        
-        # 四球と三振
-        walks = countpr(group, 'Walk')
-        strikeouts = countpr(group, 'Strikeout')
-        
-        # 犠打と犠飛
-        sac_bunt = countpr(group.query('TaggedHitType == "GroundBall"'), 'Sacrifice')
-        sac_fly = countpr(group.query('TaggedHitType == "FlyBall"'), 'Sacrifice')
-        
-        # 打点
-        rbi = int(group.RunsScored.sum())
-        
-        # 計算された指標
-        batting_avg = BA(group)
-        on_base_pct = OBP(group, mc=False)
-        slugging_pct = SA(group)
-        ops = OPS(group)
-        
-        # 三振率
-        so_rate = round(strikeouts / plate_appearances * 100, 1) if plate_appearances > 0 else 0
-        
-        # 結果を辞書として追加
-        stats = {
-            "打者": batter,
-            "打席": plate_appearances,
-            "打数": at_bats,
-            "安打": hits,
-            "単打": single,
-            "二塁打": double,
-            "三塁打": triple,
-            "本塁打": homerun,
-            "打点": rbi,
-            "犠打": sac_bunt,
-            "犠飛": sac_fly,
-            "四球": walks,
-            "三振": strikeouts,
-            "打率": batting_avg,
-            "出塁率": on_base_pct,
-            "長打率": slugging_pct,
-            "OPS": ops,
-            "三振率": so_rate,
-        }
-        results.append(stats)
+        try:
+            # 各統計を一度だけ計算
+            plate_appearances = seki(group)
+            at_bats = dasu(group)
+            
+            # 各種ヒット数を計算
+            single = countpr(group, 'Single')
+            double = countpr(group, 'Double')
+            triple = countpr(group, 'Triple')
+            homerun = countpr(group, 'HomeRun')
+            hits = single + double + triple + homerun
+            
+            # 四球と三振
+            walks = countpr(group, 'Walk')
+            strikeouts = countpr(group, 'Strikeout')
+            
+            # 犠打と犠飛
+            sac_bunt = countpr(group.query('TaggedHitType == "GroundBall"'), 'Sacrifice')
+            sac_fly = countpr(group.query('TaggedHitType == "FlyBall"'), 'Sacrifice')
+            
+            # 打点
+            rbi = int(group.RunsScored.fillna(0).sum())
+            
+            # 計算された指標
+            batting_avg = BA(group)
+            on_base_pct = OBP(group, mc=False)
+            slugging_pct = SA(group)
+            ops = OPS(group)
+            
+            # 三振率
+            so_rate = round(strikeouts / plate_appearances * 100, 1) if plate_appearances > 0 else 0
+            
+            # 結果を辞書として追加
+            stats = {
+                "打者": batter,
+                "打席": plate_appearances,
+                "打数": at_bats,
+                "安打": hits,
+                "単打": single,
+                "二塁打": double,
+                "三塁打": triple,
+                "本塁打": homerun,
+                "打点": rbi,
+                "犠打": sac_bunt,
+                "犠飛": sac_fly,
+                "四球": walks,
+                "三振": strikeouts,
+                "打率": batting_avg,
+                "出塁率": on_base_pct,
+                "長打率": slugging_pct,
+                "OPS": ops,
+                "三振率": so_rate,
+            }
+            results.append(stats)
+        except Exception as e:
+            st.warning(f"打者 {batter} の成績計算中にエラー: {e}")
+            continue
     
     # 結果をDataFrameに変換して並べ替え
     if not results:
@@ -197,11 +198,6 @@ def compute_batter_stats_optimized(df):
 def calculate_stats_pitcher_optimized(df):
     """
     投手成績を計算する関数（最適化版）
-    
-    改善点:
-    - エラー処理を強化
-    - 計算の簡略化
-    - パフォーマンス最適化
     """
     if df is None or df.empty:
         return pd.DataFrame()
@@ -363,27 +359,39 @@ def main():
         return
     
     # 日付フィルタ
+    date_range = None
     if df is not None and not df.empty and "Date" in df.columns:
         try:
-            min_date = df["Date"].min().to_pydatetime()
-            max_date = df["Date"].max().to_pydatetime()
-            selected_date_range = st.sidebar.date_input(
-                "日付範囲を選択", 
-                value=(min_date, max_date),
-                min_value=min_date,
-                max_value=max_date
-            )
+            # 日付の最小値と最大値を取得
+            min_date = df["Date"].min()
+            max_date = df["Date"].max()
             
-            # 日付選択が単一の場合は範囲として扱う
-            if isinstance(selected_date_range, tuple) and len(selected_date_range) == 2:
-                date_range = selected_date_range
+            # 日付データが有効であれば表示
+            if pd.notna(min_date) and pd.notna(max_date):
+                min_date = min_date.date()
+                max_date = max_date.date()
+                
+                # 日付選択ウィジェットを表示
+                selected_dates = st.sidebar.date_input(
+                    "日付範囲を選択", 
+                    value=(min_date, max_date),
+                    min_value=min_date,
+                    max_value=max_date
+                )
+                
+                # 選択された日付を適切に処理
+                if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
+                    date_range = selected_dates
+                elif isinstance(selected_dates, date):
+                    # 単一の日付が選択された場合は同じ日付をstart/endに設定
+                    date_range = (selected_dates, selected_dates)
+                else:
+                    st.warning("有効な日付範囲を選択してください。")
             else:
-                date_range = (selected_date_range, selected_date_range)
+                st.warning("データセットに有効な日付情報がありません。")
         except Exception as e:
             st.warning(f"日付の処理中にエラーが発生しました: {e}")
-            date_range = None
-    else:
-        date_range = None
+            st.info("日付フィルタを無視して全データを表示します。")
     
     # 投手/打者フィルタ
     side_filter = []
@@ -427,6 +435,15 @@ def main():
                     
                 st.subheader("打者成績")
                 
+                # 並び替えオプション
+                sort_column = st.selectbox(
+                    "並び替え項目", 
+                    ["OPS", "打率", "本塁打", "打点", "出塁率", "長打率"],
+                    index=0
+                )
+                ascending = st.checkbox("昇順に並べ替え", value=False)
+                stats_df = stats_df.sort_values(sort_column, ascending=ascending)
+                
                 # 表示オプション
                 use_pagination = st.checkbox("ページネーションを使用", value=True)
                 
@@ -454,10 +471,13 @@ def main():
                     
                 # CSV出力オプション
                 if st.button("CSVでダウンロード"):
-                    csv = stats_df.to_csv(index=False)
-                    b64 = base64.b64encode(csv.encode()).decode()
-                    href = f'<a href="data:file/csv;base64,{b64}" download="batter_stats.csv">CSVファイルをダウンロード</a>'
-                    st.markdown(href, unsafe_allow_html=True)
+                    try:
+                        csv = stats_df.to_csv(index=False)
+                        b64 = base64.b64encode(csv.encode("utf-8-sig")).decode()
+                        href = f'<a href="data:file/csv;base64,{b64}" download="batter_stats.csv">CSVファイルをダウンロード</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"CSVダウンロード準備中にエラーが発生しました: {e}")
                 
             except Exception as e:
                 st.error("打者成績の集計に失敗しました")
@@ -476,7 +496,8 @@ def main():
                     ['K-BB%', 'K%', 'BB%', 'WHIP', '被打率', '被OPS'],
                     index=0
                 )
-                stats_df = stats_df.sort_values(sort_column, ascending=False)
+                ascending = st.checkbox("昇順に並べ替え", value=False)
+                stats_df = stats_df.sort_values(sort_column, ascending=ascending)
                 
                 st.subheader("投手成績")
                 
@@ -507,52 +528,21 @@ def main():
                 
                 # CSV出力オプション
                 if st.button("CSVでダウンロード"):
-                    csv = stats_df.to_csv(index=False)
-                    b64 = base64.b64encode(csv.encode()).decode()
-                    href = f'<a href="data:file/csv;base64,{b64}" download="pitcher_stats.csv">CSVファイルをダウンロード</a>'
-                    st.markdown(href, unsafe_allow_html=True)
+                    try:
+                        csv = stats_df.to_csv(index=False)
+                        b64 = base64.b64encode(csv.encode("utf-8-sig")).decode()
+                        href = f'<a href="data:file/csv;base64,{b64}" download="pitcher_stats.csv">CSVファイルをダウンロード</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"CSVダウンロード準備中にエラーが発生しました: {e}")
                 
             except Exception as e:
                 st.error("投手成績の集計に失敗しました")
                 st.exception(e)
 
-# プロファイリング機能の追加（オプション）
-def add_profiling():
-    """
-    アプリにプロファイリング機能を追加する関数
-    
-    この関数は開発時のみ有効にして、本番環境ではコメントアウトすることを推奨
-    """
-    try:
-        import cProfile
-        import pstats
-        import io
-        from contextlib import contextmanager
-        
-        @contextmanager
-        def profiled():
-            pr = cProfile.Profile()
-            pr.enable()
-            yield
-            pr.disable()
-            s = io.StringIO()
-            ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
-            ps.print_stats(20)  # 上位20件のみ表示
-            st.code(s.getvalue())
-        
-        # プロファイリングを有効にするかのチェックボックス
-        if st.sidebar.checkbox("パフォーマンス分析を有効化"):
-            with profiled():
-                main()
-        else:
-            main()
-    except ImportError:
-        # プロファイリングライブラリが利用できない場合は通常実行
-        main()
-
 if __name__ == "__main__":
-    # プロファイリングを有効にする場合はコメントを外す
-    # add_profiling()
-    
-    # 通常実行
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"アプリケーション実行中にエラーが発生しました: {e}")
+        st.info("詳細なエラー情報を確認するには、Streamlitのデバッグモードを有効にしてください。")
