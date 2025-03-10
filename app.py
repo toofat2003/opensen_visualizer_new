@@ -183,11 +183,11 @@ def main():
     if update_button:
         st.info("更新ボタンが押されたので、キャッシュをクリアして最新データを取得します。")
         # st.cache_dataのキャッシュをクリアして再読み込み
-        load_data_from_google_spreadsheet.clear()
-        data = load_data_from_google_spreadsheet()
+        load_data_from_csv.clear()
+        data = load_data_from_csv()
         st.session_state.raw_data = data
     elif "raw_data" not in st.session_state:
-        data = load_data_from_google_spreadsheet()
+        data = load_data_from_csv()
         st.session_state.raw_data = data
     else:
         st.info("キャッシュ済みのデータを使用しています。")
