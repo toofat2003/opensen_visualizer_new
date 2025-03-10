@@ -109,108 +109,123 @@ def filter_data(df, level_filter, date_range, side_filter, team_filter, data_typ
 @st.cache_data(ttl=86400)
 def compute_batter_stats_optimized(df):
     """
-    打者成績を計算する関数（高速化版）- 各指標を一括で効率的に計算
+    打者成績を計算する関数（超高速化版）- ベクトル化処理とクエリの最小化による最適化
     """
     if df is None or df.empty:
         return pd.DataFrame()
-        
-    results = []
     
-    # 必要な変数を一度だけ定義
-    hit_types = ["Single", "Double", "Triple", "HomeRun"]
+    # 最初に必要な列だけを抽出してコピーを作成（メモリ使用量削減）
+    needed_columns = ['Batter', 'PitchCall', 'KorBB', 'PlayResult', 'TaggedHitType', 'RunsScored', 'ExitSpeed']
+    # 存在する列だけを選択
+    df_slim = df[[col for col in needed_columns if col in df.columns]].copy()
+    
+    # データフレームに必要な条件フラグを一度に追加（ベクトル化処理）
+    # 打席対象のピッチか
     ph = ["InPlay", "HitByPitch"]
     kb = ["Strikeout", "Walk"]
     
-    # 各打者ごとに処理
-    for batter, batter_df in df.groupby("Batter"):
-        try:
-            # データフレームをリセット
-            df1 = batter_df.reset_index(drop=True)
-            
-            # 基本的なデータフレームのフィルタリングを一度だけ実行
-            filtered_df = df1.query("PitchCall == @ph or KorBB == @kb")
-            
-            # 打席数
-            plate_appearances = len(filtered_df)
-            
-            # 犠牲打数
-            sacrifice_count = len(filtered_df.query('PlayResult == "Sacrifice"'))
-            bunt_fc_count = len(filtered_df.query('TaggedHitType == "Bunt" and PlayResult == "FieldersChoice"'))
-            sac_total = sacrifice_count + bunt_fc_count
-            
-            # 四死球数
-            bb_count = len(filtered_df.query('PitchCall == "HitByPitch" or KorBB == "Walk"'))
-            
-            # 打数 (打席 - 犠打 - 四死球)
-            at_bats = plate_appearances - sac_total - bb_count
-            
-            # 各種ヒット数
-            single_count = len(filtered_df.query('PlayResult == "Single"'))
-            double_count = len(filtered_df.query('PlayResult == "Double"'))
-            triple_count = len(filtered_df.query('PlayResult == "Triple"'))
-            homerun_count = len(filtered_df.query('PlayResult == "HomeRun"'))
-            hit_count = single_count + double_count + triple_count + homerun_count
-            
-            # 打率
-            batting_avg = round(hit_count / at_bats, 3) if at_bats > 0 else np.nan
-            
-            # 三振数
-            strikeout_count = len(filtered_df.query('KorBB == "Strikeout"'))
-            
-            # 犠打と犠飛
-            sac_bunt = len(filtered_df.query('PlayResult == "Sacrifice" and TaggedHitType == "GroundBall"'))
-            sac_fly = len(filtered_df.query('PlayResult == "Sacrifice" and TaggedHitType == "FlyBall"'))
-            
-            # 出塁率の計算
-            # バント犠打数（犠飛は含まない）
-            bunt_sacrifices = len(filtered_df.query('PlayResult == "Sacrifice" and TaggedHitType in ["Bunt", "GroundBall"]'))
-            obp_denominator = plate_appearances - bunt_sacrifices
-            obp = round((hit_count + bb_count) / obp_denominator, 3) if obp_denominator > 0 else np.nan
-            
-            # 長打率の計算
-            total_bases = single_count + (2 * double_count) + (3 * triple_count) + (4 * homerun_count)
-            slugging_pct = round(total_bases / at_bats, 3) if at_bats > 0 else np.nan
-            
-            # OPS
-            ops = round(obp + slugging_pct, 3) if not (np.isnan(obp) or np.isnan(slugging_pct)) else np.nan
-            
-            # 三振率
-            so_rate = round(strikeout_count / plate_appearances * 100, 1) if plate_appearances > 0 else 0
-            
-            # 打点
-            rbi = int(batter_df.RunsScored.fillna(0).sum())
-            
-            # 結果を辞書として追加
-            stats = {
-                "打者": batter,
-                "打席": plate_appearances,
-                "打数": at_bats,
-                "安打": hit_count,
-                "単打": single_count,
-                "二塁打": double_count,
-                "三塁打": triple_count,
-                "本塁打": homerun_count,
-                "打点": rbi,
-                "犠打": sac_bunt,
-                "犠飛": sac_fly,
-                "四球": len(filtered_df.query('KorBB == "Walk"')),
-                "三振": strikeout_count,
-                "打率": batting_avg,
-                "出塁率": obp,
-                "長打率": slugging_pct,
-                "OPS": ops,
-                "三振率": so_rate,
-            }
-            results.append(stats)
-        except Exception as e:
-            st.warning(f"打者 {batter} の成績計算中にエラー: {e}")
-            continue
+    # 条件マスクを作成（ベクトル化）
+    df_slim['is_plate_appearance'] = df_slim['PitchCall'].isin(ph) | df_slim['KorBB'].isin(kb)
+    df_slim['is_hit'] = df_slim['PlayResult'].isin(["Single", "Double", "Triple", "HomeRun"])
+    df_slim['is_sacrifice'] = df_slim['PlayResult'] == "Sacrifice"
+    df_slim['is_bunt_fc'] = (df_slim['TaggedHitType'] == "Bunt") & (df_slim['PlayResult'] == "FieldersChoice")
+    df_slim['is_bb_or_hbp'] = (df_slim['PitchCall'] == "HitByPitch") | (df_slim['KorBB'] == "Walk")
+    df_slim['is_strikeout'] = df_slim['KorBB'] == "Strikeout"
     
-    # 結果をDataFrameに変換して並べ替え
-    if not results:
-        return pd.DataFrame()
+    # 各ヒットタイプのフラグ
+    df_slim['is_single'] = df_slim['PlayResult'] == "Single"
+    df_slim['is_double'] = df_slim['PlayResult'] == "Double"
+    df_slim['is_triple'] = df_slim['PlayResult'] == "Triple"
+    df_slim['is_homerun'] = df_slim['PlayResult'] == "HomeRun"
     
-    result_df = pd.DataFrame(results)
+    # 犠打と犠飛
+    df_slim['is_sac_bunt'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "GroundBall")
+    df_slim['is_sac_fly'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "FlyBall")
+    
+    # 必要な統計を一度にまとめて集計（groupby操作の回数を最小化）
+    stats = df_slim[df_slim['is_plate_appearance']].groupby('Batter').agg(
+        plate_appearances=('is_plate_appearance', 'sum'),
+        sacrifice_count=('is_sacrifice', 'sum'),
+        bunt_fc_count=('is_bunt_fc', 'sum'),
+        bb_count=('is_bb_or_hbp', 'sum'),
+        single_count=('is_single', 'sum'),
+        double_count=('is_double', 'sum'),
+        triple_count=('is_triple', 'sum'),
+        homerun_count=('is_homerun', 'sum'),
+        strikeout_count=('is_strikeout', 'sum'),
+        sac_bunt_count=('is_sac_bunt', 'sum'),
+        sac_fly_count=('is_sac_fly', 'sum'),
+        hit_count=('is_hit', 'sum'),
+    ).reset_index()
+    
+    # 打点の計算 - 別途集計する必要がある
+    rbi_by_batter = df.groupby('Batter')['RunsScored'].sum().fillna(0).astype(int).reset_index()
+    stats = pd.merge(stats, rbi_by_batter, on='Batter', how='left')
+    
+    # 打数計算
+    stats['sac_total'] = stats['sacrifice_count'] + stats['bunt_fc_count']
+    stats['at_bats'] = stats['plate_appearances'] - stats['sac_total'] - stats['bb_count']
+    
+    # 打率、出塁率、長打率の計算（ベクトル化）
+    # 0除算を防ぐマスク
+    at_bats_mask = stats['at_bats'] > 0
+    obp_denominator_mask = (stats['plate_appearances'] - stats['sac_bunt_count']) > 0
+    
+    # 打率
+    stats['batting_avg'] = np.nan
+    stats.loc[at_bats_mask, 'batting_avg'] = (stats.loc[at_bats_mask, 'hit_count'] / 
+                                             stats.loc[at_bats_mask, 'at_bats']).round(3)
+    
+    # 出塁率
+    stats['obp_denominator'] = stats['plate_appearances'] - stats['sac_bunt_count']
+    stats['on_base_pct'] = np.nan
+    stats.loc[obp_denominator_mask, 'on_base_pct'] = ((stats.loc[obp_denominator_mask, 'hit_count'] + 
+                                                     stats.loc[obp_denominator_mask, 'bb_count']) / 
+                                                    stats.loc[obp_denominator_mask, 'obp_denominator']).round(3)
+    
+    # 長打率
+    stats['total_bases'] = (stats['single_count'] + 
+                           (2 * stats['double_count']) + 
+                           (3 * stats['triple_count']) + 
+                           (4 * stats['homerun_count']))
+    stats['slugging_pct'] = np.nan
+    stats.loc[at_bats_mask, 'slugging_pct'] = (stats.loc[at_bats_mask, 'total_bases'] / 
+                                              stats.loc[at_bats_mask, 'at_bats']).round(3)
+    
+    # OPS
+    stats['ops'] = (stats['on_base_pct'].fillna(0) + stats['slugging_pct'].fillna(0)).round(3)
+    # NaNの場合は0として計算したOPSをNaNに戻す
+    stats.loc[stats['on_base_pct'].isna() | stats['slugging_pct'].isna(), 'ops'] = np.nan
+    
+    # 三振率
+    stats['so_rate'] = np.where(
+        stats['plate_appearances'] > 0,
+        (stats['strikeout_count'] / stats['plate_appearances'] * 100).round(1),
+        0
+    )
+    
+    # 結果のデータフレームを作成
+    result_df = pd.DataFrame({
+        "打者": stats['Batter'],
+        "打席": stats['plate_appearances'],
+        "打数": stats['at_bats'],
+        "安打": stats['hit_count'],
+        "単打": stats['single_count'],
+        "二塁打": stats['double_count'],
+        "三塁打": stats['triple_count'],
+        "本塁打": stats['homerun_count'],
+        "打点": stats['RunsScored'],
+        "犠打": stats['sac_bunt_count'],
+        "犠飛": stats['sac_fly_count'],
+        "四球": stats.apply(lambda x: x['bb_count'] - (x['PitchCall'] == "HitByPitch").sum() 
+                         if 'PitchCall' in df_slim.columns else x['bb_count'], axis=1),
+        "三振": stats['strikeout_count'],
+        "打率": stats['batting_avg'],
+        "出塁率": stats['on_base_pct'],
+        "長打率": stats['slugging_pct'],
+        "OPS": stats['ops'],
+        "三振率": stats['so_rate']
+    })
     
     # 表示列の順序を指定
     columns = ["打者", "打率", "打点", "出塁率", "長打率", "OPS", 
