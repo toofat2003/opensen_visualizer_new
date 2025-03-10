@@ -107,7 +107,7 @@ def filter_data(df, level_filter, date_range, side_filter, team_filter, data_typ
     return df
 
 @st.cache_data(ttl=86400)
-def compute_batter_stats_highly_optimized(df):
+def compute_batter_stats_optimized(df):
     """
     打者成績を計算する関数（超高速化版）- ベクトル化処理とクエリの最小化による最適化
     """
