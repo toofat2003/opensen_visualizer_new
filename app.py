@@ -107,7 +107,7 @@ def filter_data(df, level_filter, date_range, side_filter, team_filter, data_typ
     return df
 
 @st.cache_data(ttl=86400)
-def compute_batter_stats_optimized(df):
+def compute_batter_stats_highly_optimized(df):
     """
     打者成績を計算する関数（超高速化版）- ベクトル化処理とクエリの最小化による最適化
     """
@@ -117,7 +117,8 @@ def compute_batter_stats_optimized(df):
     # 最初に必要な列だけを抽出してコピーを作成（メモリ使用量削減）
     needed_columns = ['Batter', 'PitchCall', 'KorBB', 'PlayResult', 'TaggedHitType', 'RunsScored', 'ExitSpeed']
     # 存在する列だけを選択
-    df_slim = df[[col for col in needed_columns if col in df.columns]].copy()
+    available_cols = [col for col in needed_columns if col in df.columns]
+    df_slim = df[available_cols].copy()
     
     # データフレームに必要な条件フラグを一度に追加（ベクトル化処理）
     # 打席対象のピッチか
@@ -125,29 +126,46 @@ def compute_batter_stats_optimized(df):
     kb = ["Strikeout", "Walk"]
     
     # 条件マスクを作成（ベクトル化）
-    df_slim['is_plate_appearance'] = df_slim['PitchCall'].isin(ph) | df_slim['KorBB'].isin(kb)
-    df_slim['is_hit'] = df_slim['PlayResult'].isin(["Single", "Double", "Triple", "HomeRun"])
-    df_slim['is_sacrifice'] = df_slim['PlayResult'] == "Sacrifice"
-    df_slim['is_bunt_fc'] = (df_slim['TaggedHitType'] == "Bunt") & (df_slim['PlayResult'] == "FieldersChoice")
-    df_slim['is_bb_or_hbp'] = (df_slim['PitchCall'] == "HitByPitch") | (df_slim['KorBB'] == "Walk")
-    df_slim['is_strikeout'] = df_slim['KorBB'] == "Strikeout"
+    df_slim['is_plate_appearance'] = (df_slim['PitchCall'].isin(ph) | df_slim['KorBB'].isin(kb)) if 'PitchCall' in df_slim.columns and 'KorBB' in df_slim.columns else False
+    df_slim['is_hit'] = df_slim['PlayResult'].isin(["Single", "Double", "Triple", "HomeRun"]) if 'PlayResult' in df_slim.columns else False
+    df_slim['is_sacrifice'] = df_slim['PlayResult'] == "Sacrifice" if 'PlayResult' in df_slim.columns else False
+    df_slim['is_bunt_fc'] = ((df_slim['TaggedHitType'] == "Bunt") & (df_slim['PlayResult'] == "FieldersChoice")) if 'TaggedHitType' in df_slim.columns and 'PlayResult' in df_slim.columns else False
+    
+    # 四死球とヒットバイピッチを別々に計算
+    df_slim['is_walk'] = df_slim['KorBB'] == "Walk" if 'KorBB' in df_slim.columns else False
+    df_slim['is_hbp'] = df_slim['PitchCall'] == "HitByPitch" if 'PitchCall' in df_slim.columns else False
+    df_slim['is_bb_or_hbp'] = df_slim['is_walk'] | df_slim['is_hbp']
+    
+    df_slim['is_strikeout'] = df_slim['KorBB'] == "Strikeout" if 'KorBB' in df_slim.columns else False
     
     # 各ヒットタイプのフラグ
-    df_slim['is_single'] = df_slim['PlayResult'] == "Single"
-    df_slim['is_double'] = df_slim['PlayResult'] == "Double"
-    df_slim['is_triple'] = df_slim['PlayResult'] == "Triple"
-    df_slim['is_homerun'] = df_slim['PlayResult'] == "HomeRun"
+    df_slim['is_single'] = df_slim['PlayResult'] == "Single" if 'PlayResult' in df_slim.columns else False
+    df_slim['is_double'] = df_slim['PlayResult'] == "Double" if 'PlayResult' in df_slim.columns else False
+    df_slim['is_triple'] = df_slim['PlayResult'] == "Triple" if 'PlayResult' in df_slim.columns else False
+    df_slim['is_homerun'] = df_slim['PlayResult'] == "HomeRun" if 'PlayResult' in df_slim.columns else False
     
     # 犠打と犠飛
-    df_slim['is_sac_bunt'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "GroundBall")
-    df_slim['is_sac_fly'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "FlyBall")
+    if 'TaggedHitType' in df_slim.columns:
+        df_slim['is_sac_bunt'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "GroundBall")
+        df_slim['is_sac_fly'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "FlyBall")
+    else:
+        df_slim['is_sac_bunt'] = False
+        df_slim['is_sac_fly'] = False
+    
+    # 打席のあるデータだけに絞る
+    plate_app_df = df_slim[df_slim['is_plate_appearance']]
+    
+    # 空のデータフレームの場合は、空の結果を返す
+    if plate_app_df.empty:
+        return pd.DataFrame()
     
     # 必要な統計を一度にまとめて集計（groupby操作の回数を最小化）
-    stats = df_slim[df_slim['is_plate_appearance']].groupby('Batter').agg(
+    stats = plate_app_df.groupby('Batter').agg(
         plate_appearances=('is_plate_appearance', 'sum'),
         sacrifice_count=('is_sacrifice', 'sum'),
         bunt_fc_count=('is_bunt_fc', 'sum'),
-        bb_count=('is_bb_or_hbp', 'sum'),
+        walk_count=('is_walk', 'sum'),
+        hbp_count=('is_hbp', 'sum'),
         single_count=('is_single', 'sum'),
         double_count=('is_double', 'sum'),
         triple_count=('is_triple', 'sum'),
@@ -159,8 +177,14 @@ def compute_batter_stats_optimized(df):
     ).reset_index()
     
     # 打点の計算 - 別途集計する必要がある
-    rbi_by_batter = df.groupby('Batter')['RunsScored'].sum().fillna(0).astype(int).reset_index()
-    stats = pd.merge(stats, rbi_by_batter, on='Batter', how='left')
+    if 'RunsScored' in df_slim.columns:
+        rbi_by_batter = df.groupby('Batter')['RunsScored'].sum().fillna(0).astype(int).reset_index()
+        stats = pd.merge(stats, rbi_by_batter, on='Batter', how='left')
+    else:
+        stats['RunsScored'] = 0
+    
+    # 四死球の合計
+    stats['bb_count'] = stats['walk_count'] + stats['hbp_count']
     
     # 打数計算
     stats['sac_total'] = stats['sacrifice_count'] + stats['bunt_fc_count']
@@ -217,8 +241,7 @@ def compute_batter_stats_optimized(df):
         "打点": stats['RunsScored'],
         "犠打": stats['sac_bunt_count'],
         "犠飛": stats['sac_fly_count'],
-        "四球": stats.apply(lambda x: x['bb_count'] - (x['PitchCall'] == "HitByPitch").sum() 
-                         if 'PitchCall' in df_slim.columns else x['bb_count'], axis=1),
+        "四球": stats['walk_count'],  # walk_countを直接使用、applyは使わない
         "三振": stats['strikeout_count'],
         "打率": stats['batting_avg'],
         "出塁率": stats['on_base_pct'],
