@@ -150,7 +150,7 @@ def compute_batter_stats_optimized(df):
     
     # 犠打と犠飛
     if 'TaggedHitType' in df_slim.columns:
-        df_slim['is_sac_bunt'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] in ["Bunt", "GroundBall"])
+        df_slim['is_sac_bunt'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "Bunt")
         df_slim['is_sac_fly'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "FlyBall")
     else:
         df_slim['is_sac_bunt'] = False
