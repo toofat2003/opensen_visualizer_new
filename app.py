@@ -112,12 +112,14 @@ def filter_data(df, level_filter, date_range, side_filter, team_filter, data_typ
 def compute_batter_stats_optimized(df):
     """
     打者成績を計算する関数（超高速化版）- ベクトル化処理とクエリの最小化による最適化
+    盗塁と盗塁死の統計を追加
     """
     if df is None or df.empty:
         return pd.DataFrame()
     
     # 最初に必要な列だけを抽出してコピーを作成（メモリ使用量削減）
-    needed_columns = ['Batter', 'PitchCall', 'KorBB', 'PlayResult', 'TaggedHitType', 'RunsScored', 'ExitSpeed']
+    needed_columns = ['Batter', 'PitchCall', 'KorBB', 'PlayResult', 'TaggedHitType', 
+                      'RunsScored', 'ExitSpeed', 'on_1b', 'on_2b', 'runevent']
     # 存在する列だけを選択
     available_cols = [col for col in needed_columns if col in df.columns]
     df_slim = df[available_cols].copy()
@@ -185,6 +187,61 @@ def compute_batter_stats_optimized(df):
     else:
         stats['RunsScored'] = 0
     
+    # 盗塁と盗塁死の統計を計算
+    # 盗塁と盗塁死のデータを集計するための条件
+    if all(col in df.columns for col in ['on_1b', 'on_2b', 'runevent']):
+        # 盗塁成功 - 選手がon_1bまたはon_2bにいて、runeventがStolenBase
+        # on_1bの選手の盗塁
+        sb_1b = df[df['runevent'] == 'StolenBase'].groupby('on_1b').size().reset_index(name='sb_from_1b')
+        sb_1b = sb_1b[sb_1b['on_1b'] != '']  # 空の文字列を除外
+        
+        # on_2bの選手の盗塁
+        sb_2b = df[df['runevent'] == 'StolenBase'].groupby('on_2b').size().reset_index(name='sb_from_2b')
+        sb_2b = sb_2b[sb_2b['on_2b'] != '']  # 空の文字列を除外
+        
+        # 盗塁死 - 選手がon_1bまたはon_2bにいて、runeventがCaughtStealing
+        # on_1bの選手の盗塁死
+        cs_1b = df[df['runevent'] == 'CaughtStealing'].groupby('on_1b').size().reset_index(name='cs_from_1b')
+        cs_1b = cs_1b[cs_1b['on_1b'] != '']  # 空の文字列を除外
+        
+        # on_2bの選手の盗塁死
+        cs_2b = df[df['runevent'] == 'CaughtStealing'].groupby('on_2b').size().reset_index(name='cs_from_2b')
+        cs_2b = cs_2b[cs_2b['on_2b'] != '']  # 空の文字列を除外
+        
+        # 各統計をBatterと結合
+        # 1塁からの盗塁
+        stats = pd.merge(stats, sb_1b.rename(columns={'on_1b': 'Batter'}), on='Batter', how='left')
+        # 2塁からの盗塁
+        stats = pd.merge(stats, sb_2b.rename(columns={'on_2b': 'Batter'}), on='Batter', how='left')
+        # 1塁からの盗塁死
+        stats = pd.merge(stats, cs_1b.rename(columns={'on_1b': 'Batter'}), on='Batter', how='left')
+        # 2塁からの盗塁死
+        stats = pd.merge(stats, cs_2b.rename(columns={'on_2b': 'Batter'}), on='Batter', how='left')
+        
+        # NaNを0に置換
+        for col in ['sb_from_1b', 'sb_from_2b', 'cs_from_1b', 'cs_from_2b']:
+            if col in stats.columns:
+                stats[col] = stats[col].fillna(0).astype(int)
+            else:
+                stats[col] = 0
+        
+        # 盗塁合計と盗塁死合計を計算
+        stats['stolen_bases'] = stats['sb_from_1b'] + stats['sb_from_2b']
+        stats['caught_stealing'] = stats['cs_from_1b'] + stats['cs_from_2b']
+        
+        # 盗塁成功率を計算（盗塁試行が0の場合はNaN）
+        stats['sb_attempts'] = stats['stolen_bases'] + stats['caught_stealing']
+        stats['sb_success_rate'] = np.where(
+            stats['sb_attempts'] > 0,
+            (stats['stolen_bases'] / stats['sb_attempts'] * 100).round(1),
+            np.nan
+        )
+    else:
+        # 必要な列がない場合は0を設定
+        stats['stolen_bases'] = 0
+        stats['caught_stealing'] = 0
+        stats['sb_success_rate'] = np.nan
+    
     # 四死球の合計
     stats['bb_count'] = stats['walk_count'] + stats['hbp_count']
     
@@ -241,9 +298,12 @@ def compute_batter_stats_optimized(df):
         "三塁打": stats['triple_count'],
         "本塁打": stats['homerun_count'],
         "打点": stats['RunsScored'],
+        "盗塁": stats['stolen_bases'],
+        "盗塁死": stats['caught_stealing'],
+        "盗塁成功率": stats['sb_success_rate'],
         "犠打": stats['sac_bunt_count'],
         "犠飛": stats['sac_fly_count'],
-        "四球": stats['walk_count'],  # walk_countを直接使用、applyは使わない
+        "四球": stats['walk_count'],
         "三振": stats['strikeout_count'],
         "打率": stats['batting_avg'],
         "出塁率": stats['on_base_pct'],
@@ -253,9 +313,10 @@ def compute_batter_stats_optimized(df):
     })
     
     # 表示列の順序を指定
-    columns = ["打者", "打率", "打点", "出塁率", "長打率", "OPS", 
-               "打席", "打数", "安打", "単打", "二塁打", "三塁打", 
-               "本塁打", "四球", "三振", "犠打", "犠飛", "三振率"]
+    columns = ["打者","打席", "打数", "安打", "打率", "打点", "出塁率", "長打率", "OPS", 
+                "単打", "二塁打", "三塁打", 
+               "本塁打","四球", "三振", 
+               "犠打", "犠飛", "三振率", "盗塁", "盗塁死", "盗塁成功率", ]
     
     # 存在する列のみを使用して並べ替え
     valid_columns = [col for col in columns if col in result_df.columns]
@@ -451,7 +512,7 @@ def calculate_stats_pitcher_optimized(df):
     result_df = pd.DataFrame(result, columns=columns)
     return result_df
 
-def display_with_fixed_columns(stats_df, key_column, use_pagination=True, rows_per_page=10, min_column_width=150):
+def display_with_fixed_columns(stats_df, key_column, use_pagination=True, rows_per_page=10, min_column_width=80):
     """
     AgGridを使用して特定の列を固定表示するデータフレーム表示関数
     列幅を調整して表示を改善
