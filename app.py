@@ -4,6 +4,8 @@ import glob
 import time
 import base64
 from datetime import datetime, date
+import numpy as np
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 # baseballmetricsモジュール（成績計算関数群）をインポート
 from baseballmetrics import *
@@ -449,6 +451,43 @@ def calculate_stats_pitcher_optimized(df):
     result_df = pd.DataFrame(result, columns=columns)
     return result_df
 
+# AgGridを使用して固定列のあるデータフレームを表示する関数
+def display_with_fixed_columns(stats_df, key_column, use_pagination=True, rows_per_page=10):
+    """
+    AgGridを使用して特定の列を固定表示するデータフレーム表示関数
+    
+    Args:
+        stats_df: 表示するデータフレーム
+        key_column: 固定する列名（例："打者"や"Pitcher"）
+        use_pagination: ページネーションを使用するかどうか
+        rows_per_page: 1ページあたりの行数
+    """
+    # GridOptionsBuilderを使ってオプションを設定
+    gb = GridOptionsBuilder.from_dataframe(stats_df)
+    
+    # key_column列を固定する設定
+    gb.configure_column(key_column, pinned="left")
+    
+    # 各列の幅を自動調整
+    gb.configure_default_column(resizable=True, filterable=True, sortable=True)
+    
+    # ページネーション設定
+    if use_pagination:
+        gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=rows_per_page)
+    
+    # グリッドオプションを取得
+    grid_options = gb.build()
+    
+    # AgGridでデータを表示
+    return AgGrid(
+        stats_df,
+        gridOptions=grid_options,
+        height=500,  # 高さの設定（適宜調整）
+        fit_columns_on_grid_load=True,
+        allow_unsafe_jscode=True,
+        theme="streamlit"  # テーマ設定
+    )
+
 def main():
     # アプリのタイトルと説明
     st.title("オープン戦成績")
@@ -592,29 +631,13 @@ def main():
                 
                 # 表示オプション
                 use_pagination = st.checkbox("ページネーションを使用", value=True)
-                
+                rows_per_page = 10
                 if use_pagination:
-                    # ページごとの表示件数
                     rows_per_page = st.slider("1ページあたりの表示件数", 5, 50, 10)
-                    
-                    # データをページ分割して表示
-                    total_rows = len(stats_df)
-                    total_pages = (total_rows + rows_per_page - 1) // rows_per_page
-                    
-                    if total_pages > 1:
-                        page = st.selectbox("ページ", range(1, total_pages + 1))
-                        start_idx = (page - 1) * rows_per_page
-                        end_idx = min(start_idx + rows_per_page, total_rows)
-                        
-                        # 現在のページのデータを表示
-                        st.dataframe(stats_df.iloc[start_idx:end_idx], use_container_width=True)
-                        st.write(f"表示: {start_idx+1}～{end_idx} / 全{total_rows}件")
-                    else:
-                        st.dataframe(stats_df, use_container_width=True)
-                else:
-                    # ページネーションなしで全データを表示
-                    st.dataframe(stats_df, use_container_width=True)
-                    
+                
+                # AgGridを使用して列固定表示
+                display_with_fixed_columns(stats_df, "打者", use_pagination, rows_per_page)
+                
                 # CSV出力オプション
                 if st.button("CSVでダウンロード"):
                     try:
@@ -649,28 +672,12 @@ def main():
                 
                 # 表示オプション
                 use_pagination = st.checkbox("ページネーションを使用", value=True)
-                
+                rows_per_page = 10
                 if use_pagination:
-                    # ページごとの表示件数
                     rows_per_page = st.slider("1ページあたりの表示件数", 5, 50, 10)
-                    
-                    # データをページ分割して表示
-                    total_rows = len(stats_df)
-                    total_pages = (total_rows + rows_per_page - 1) // rows_per_page
-                    
-                    if total_pages > 1:
-                        page = st.selectbox("ページ", range(1, total_pages + 1))
-                        start_idx = (page - 1) * rows_per_page
-                        end_idx = min(start_idx + rows_per_page, total_rows)
-                        
-                        # 現在のページのデータを表示
-                        st.dataframe(stats_df.iloc[start_idx:end_idx], use_container_width=True)
-                        st.write(f"表示: {start_idx+1}～{end_idx} / 全{total_rows}件")
-                    else:
-                        st.dataframe(stats_df, use_container_width=True)
-                else:
-                    # ページネーションなしで全データを表示
-                    st.dataframe(stats_df, use_container_width=True)
+                
+                # AgGridを使用して列固定表示
+                display_with_fixed_columns(stats_df, "Pitcher", use_pagination, rows_per_page)
                 
                 # CSV出力オプション
                 if st.button("CSVでダウンロード"):
