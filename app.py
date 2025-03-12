@@ -150,7 +150,7 @@ def compute_batter_stats_optimized(df):
     
     # 犠打と犠飛
     if 'TaggedHitType' in df_slim.columns:
-        df_slim['is_sac_bunt'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "GroundBall")
+        df_slim['is_sac_bunt'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] in ["Bunt", "GroundBall"])
         df_slim['is_sac_fly'] = df_slim['is_sacrifice'] & (df_slim['TaggedHitType'] == "FlyBall")
     else:
         df_slim['is_sac_bunt'] = False
@@ -710,7 +710,7 @@ def main():
                 
                 # 表示オプション
                 use_pagination = st.checkbox("ページネーションを使用", value=True)
-                rows_per_page = 10
+                rows_per_page = 14
                 if use_pagination:
                     rows_per_page = st.slider("1ページあたりの表示件数", 5, 50, 10)
                 
@@ -741,7 +741,7 @@ def main():
                 # 並び替え
                 sort_column = st.selectbox(
                     "並び替え項目", 
-                    ['K-BB%', 'K%', 'BB%', 'WHIP', '被打率', '被OPS'],
+                    ['打者','K-BB%', 'K%', 'BB%', 'ストライク率','WHIP', '被打率', '被OPS'],
                     index=0
                 )
                 ascending = st.checkbox("昇順に並べ替え", value=False)
