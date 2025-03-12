@@ -451,25 +451,38 @@ def calculate_stats_pitcher_optimized(df):
     result_df = pd.DataFrame(result, columns=columns)
     return result_df
 
-# AgGridを使用して固定列のあるデータフレームを表示する関数
-def display_with_fixed_columns(stats_df, key_column, use_pagination=True, rows_per_page=10):
+def display_with_fixed_columns(stats_df, key_column, use_pagination=True, rows_per_page=10, min_column_width=150):
     """
     AgGridを使用して特定の列を固定表示するデータフレーム表示関数
+    列幅を調整して表示を改善
     
     Args:
         stats_df: 表示するデータフレーム
         key_column: 固定する列名（例："打者"や"Pitcher"）
         use_pagination: ページネーションを使用するかどうか
         rows_per_page: 1ページあたりの行数
+        min_column_width: 列の最小幅（ピクセル）
     """
     # GridOptionsBuilderを使ってオプションを設定
     gb = GridOptionsBuilder.from_dataframe(stats_df)
     
     # key_column列を固定する設定
-    gb.configure_column(key_column, pinned="left")
+    gb.configure_column(key_column, pinned="left", minWidth=min_column_width)
     
-    # 各列の幅を自動調整
-    gb.configure_default_column(resizable=True, filterable=True, sortable=True)
+    # 各列の設定
+    for col in stats_df.columns:
+        if col != key_column:
+            # 列幅を適切に設定
+            # 列名の長さや内容に応じて調整することも可能
+            gb.configure_column(col, minWidth=min_column_width, autoHeight=True)
+    
+    # 共通の列設定
+    gb.configure_default_column(
+        resizable=True,
+        filterable=True,
+        sortable=True,
+        wrapText=True,  # テキストの折り返しを有効化
+    )
     
     # ページネーション設定
     if use_pagination:
@@ -478,14 +491,19 @@ def display_with_fixed_columns(stats_df, key_column, use_pagination=True, rows_p
     # グリッドオプションを取得
     grid_options = gb.build()
     
+    # グリッド幅を広げるためのカスタムCSS
+    grid_height = 500  # 高さの設定（適宜調整）
+    
     # AgGridでデータを表示
     return AgGrid(
         stats_df,
         gridOptions=grid_options,
-        height=500,  # 高さの設定（適宜調整）
-        fit_columns_on_grid_load=True,
+        height=grid_height,
+        width="100%",  # 幅を100%に設定して表示領域を最大化
+        fit_columns_on_grid_load=False,  # 自動フィットをオフに
         allow_unsafe_jscode=True,
-        theme="streamlit"  # テーマ設定
+        theme="streamlit",  # テーマ設定
+        update_mode="MODEL_CHANGED",  # より効率的な更新モード
     )
 
 def main():
