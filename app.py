@@ -709,10 +709,8 @@ def main():
                 stats_df = stats_df.sort_values(sort_column, ascending=ascending)
                 
                 # 表示オプション
-                use_pagination = st.checkbox("ページネーションを使用", value=True)
+                use_pagination = False
                 rows_per_page = 14
-                if use_pagination:
-                    rows_per_page = st.slider("1ページあたりの表示件数", 5, 50, 10)
                 
                 # AgGridを使用して列固定表示
                 display_with_fixed_columns(stats_df, "打者", use_pagination, rows_per_page)
@@ -748,12 +746,8 @@ def main():
                 stats_df = stats_df.sort_values(sort_column, ascending=ascending)
                 
                 st.subheader("投手成績")
-                
-                # 表示オプション
-                use_pagination = st.checkbox("ページネーションを使用", value=True)
-                rows_per_page = 10
-                if use_pagination:
-                    rows_per_page = st.slider("1ページあたりの表示件数", 5, 50, 10)
+                use_pagination = False
+                rows_per_page = 14
                 
                 # AgGridを使用して列固定表示
                 display_with_fixed_columns(stats_df, "Pitcher", use_pagination, rows_per_page)
