@@ -512,7 +512,7 @@ def calculate_stats_pitcher_optimized(df):
     result_df = pd.DataFrame(result, columns=columns)
     return result_df
 
-def display_with_fixed_columns(stats_df, key_column, use_pagination=True, rows_per_page=10, min_column_width=80):
+def display_with_fixed_columns(stats_df, key_column, use_pagination=True, rows_per_page=14, min_column_width=80):
     """
     AgGridを使用して特定の列を固定表示するデータフレーム表示関数
     列幅を調整して表示を改善
