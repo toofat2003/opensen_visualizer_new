@@ -10,8 +10,6 @@ import os
 
 # baseballmetricsモジュール（成績計算関数群）をインポート
 from baseballmetrics import *
-# ワイルドカードの代わりに明示的なインポート
-from baseballmetrics import calculate_runvalue1_vectorized_final
 # --- マルチページ設定 ---
 PAGES = {
     "チーム成績": "team_stats",
