@@ -1375,6 +1375,10 @@ def player_stats_page(df):
                 # 日付でフィルタリング
                 player_key = "Batter" if player_type == "打者" else "Pitcher"
                 player_data = filtered_df[filtered_df[player_key] == selected_player]
+                if player_key == "Batter":
+                    player_data = player_data[player_data["BatterTeam"] == "TOK"]
+                else:
+                    player_data = player_data[player_data["PitcherTeam"] == "TOK"]
                 
                 if selected_dates:
                     # 選択された日付でフィルタリング
