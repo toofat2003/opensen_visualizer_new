@@ -9,3 +9,4 @@ requests>=2.25
 google-auth>=2.6
 gspread>=5.7
 joblib
+plotly>=5.0
