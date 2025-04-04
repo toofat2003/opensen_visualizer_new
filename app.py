@@ -11,7 +11,7 @@ import os
 # baseballmetricsモジュール（成績計算関数群）をインポート
 from baseballmetrics import *
 # コースプロットページのインポート
-from pitch_plot import pitch_plot_page
+from pitch_plot import pitch_plot_page_test3a
 # --- マルチページ設定 ---
 PAGES = {
     "チーム成績": "team_stats",
@@ -64,7 +64,7 @@ def main():
     elif page == "選手成績":
         player_stats_page(df)
     elif page == "コースプロット":
-        pitch_plot_page()
+        pitch_plot_page_test3a()
 
 # キャッシュ戦略の改善: st.cache_resourceを使用してデータロードを最適化
 @st.cache_resource(ttl=86640)
