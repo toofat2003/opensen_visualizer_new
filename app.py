@@ -14,14 +14,15 @@ from baseballmetrics import *
 from pitch_plot import pitch_plot_page_test3a
 # --- マルチページ設定 ---
 PAGES = {
-    "チーム成績": "team_stats",
-    "選手成績": "player_stats",
-    "コースプロット": "pitch_plot"
+    "オープン戦成績(全体)": "team_stats",
+    "オープン戦成績(個人)": "player_stats",
+    "リーグ戦成績(個人)": "player_stats_league",
+    "リーグ戦コースプロット": "pitch_plot"
 }
 
 def main():
     # アプリのタイトル
-    st.title("オープン戦成績")
+    st.title("野球部分析ツール")
     
     # ページ選択（サイドバーに配置）
     st.sidebar.title("ナビゲーション")
@@ -30,40 +31,57 @@ def main():
     # サイドバーの設定
     st.sidebar.title("設定")
     
-    # データの読み込み（改善: キャッシュ戦略の変更）
-    with st.spinner("データを読み込んでいます..."):
-        start_time = time.time()
-        
-        # 更新ボタン
-        update_button = st.sidebar.button("データ更新")
-        if update_button:
-            st.info("データを更新しています...")
-            # キャッシュをクリア
-            load_data_from_csv_files.clear()
-            filter_data.clear()
-            compute_batter_stats_optimized.clear()
-            calculate_stats_pitcher_optimized.clear()
-        
-        # データ読み込み
-        df = load_data_from_csv_files()
-        
-        end_time = time.time()
-        load_time = end_time - start_time
-        
-        # データロード時間の表示
-        if df is not None:
-            st.write(f"現在の対象試合:2025春 (データロード時間: {load_time:.2f}秒)")
-            st.write(f"総レコード数: {len(df)}")
-        else:
-            st.error("データが取得できませんでした。")
-            return
+    # --- データ更新ボタン (共通化) ---
+    update_button = st.sidebar.button("データ更新")
+    if update_button:
+        st.info("データを更新しています...")
+        # キャッシュをクリア
+        load_data_from_csv_files.clear()
+        load_data_from_trackman_csv_files.clear() # リーグ戦のキャッシュもクリア
+        filter_data.clear()
+        compute_batter_stats_optimized.clear()
+        calculate_stats_pitcher_optimized.clear()
+        # 必要であれば他のキャッシュ関数もクリア
+        st.success("キャッシュをクリアしました。ページをリロードしてください。") # 更新を促すメッセージ
+        # 更新ボタン押下後は一旦ここで処理を止め、リロードを待つのも手
+        # return
     
-    # ページの表示
-    if page == "チーム成績":
-        team_stats_page(df)
-    elif page == "選手成績":
-        player_stats_page(df)
-    elif page == "コースプロット":
+    # --- ページごとのデータ準備 ---
+    df = None
+    data_source_label = ""
+    load_time = 0.0
+
+    if page in ["オープン戦成績(全体)", "オープン戦成績(個人)"]:
+        with st.spinner("オープン戦データを読み込んでいます..."):
+            start_time = time.time()
+            df = load_data_from_csv_files()
+            data_source_label = "オープン戦 (2025春)"
+            end_time = time.time()
+            load_time = end_time - start_time
+
+            if df is not None:
+                st.write(f"現在の対象データ: {data_source_label} (データロード時間: {load_time:.2f}秒)")
+                st.write(f"総レコード数: {len(df)}")
+            # else:
+                # オープン戦データがない場合のエラーは load_data_from_csv_files 内で表示される
+                # ここではページ表示の可否判定のみ行う
+
+    # リーグ戦とコースプロットはページ関数内でデータを扱うため、ここでは何もしない
+
+    # --- ページの表示 ---
+    if page == "オープン戦成績(全体)":
+        if df is not None:
+            team_stats_page(df)
+        else:
+            st.warning("オープン戦データを読み込めなかったため、ページを表示できません。")
+    elif page == "オープン戦成績(個人)":
+        if df is not None:
+            player_stats_page(df)
+        else:
+            st.warning("オープン戦データを読み込めなかったため、ページを表示できません。")
+    elif page == "リーグ戦成績(個人)":
+        player_stats_league_page() # dfを渡さない
+    elif page == "リーグ戦コースプロット":
         pitch_plot_page_test3a()
 
 # キャッシュ戦略の改善: st.cache_resourceを使用してデータロードを最適化
@@ -113,12 +131,93 @@ def load_data_from_csv_files():
         
         # 処理時間のログ
         end_time = time.time()
-        st.write(f"データロード時間: {end_time - start_time:.2f}秒")
+        st.write(f"オープン戦データロード時間: {end_time - start_time:.2f}秒")
         
         return combined_df
         
     except Exception as e:
         st.error(f"CSVファイルの読み込みに失敗しました: {e}")
+        return None
+
+# 新しいデータ読み込み関数を追加 (シーズン指定)
+@st.cache_resource(ttl=86640)
+def load_data_from_trackman_csv_files(season: str):
+    if not season:
+        st.error("シーズンが選択されていません。")
+        return None
+
+    try:
+        start_time = time.time()
+        season_path = os.path.join('data_trackman', season)
+        is_dir = os.path.isdir(season_path)
+
+        if not is_dir:
+            st.error(f"指定されたシーズンディレクトリ '{season_path}' が見つかりません。カレントディレクトリ: {os.getcwd()}") # DEBUG カレントディレクトリ表示
+            return None
+
+        csv_files_pattern = os.path.join(season_path, '*.csv')
+        csv_files = glob.glob(csv_files_pattern)
+
+        if not csv_files:
+            st.warning(f"シーズン '{season}' にCSVファイルが見つかりません。")
+            return pd.DataFrame()
+
+        # データ型を事前に指定（日付とよく使う数値列のみ）
+        dtypes = {
+            'OutsOnPlay': 'Int64',
+            'RunsScored': 'Int64',
+        }
+        parse_dates = ['Date']
+        
+        # 全てのCSVファイルを一度にリストに読み込み
+        dfs = []
+        for file in csv_files:
+            try:
+                # エンコーディングを試行
+                encodings_to_try = ['utf-8-sig', 'shift-jis', 'cp932']
+                df_read = None
+                for enc in encodings_to_try:
+                    try:
+                        df_read = pd.read_csv(
+                            file,
+                            encoding=enc,
+                            dtype=dtypes,
+                            parse_dates=parse_dates,
+                            low_memory=False
+                        )
+                        break # 成功したらループを抜ける
+                    except UnicodeDecodeError:
+                        continue # 次のエンコーディングを試す
+                    except Exception as inner_e:
+                        st.warning(f"ファイル '{file}' (エンコーディング: {enc}) の読み込み中に予期せぬエラー: {inner_e}")
+                        break # 不明なエラーの場合は中断
+
+                if df_read is not None:
+                    dfs.append(df_read)
+                else:
+                    st.warning(f"ファイル '{file}' の読み込みに失敗しました。サポートされているエンコーディングではありません。")
+
+            except Exception as e:
+                st.warning(f"ファイル '{file}' の処理中にエラーが発生しました: {e}")
+                continue
+
+        if not dfs:
+            st.error("有効なCSVファイルがありませんでした。")
+            return None
+
+        # データフレームをまとめて結合（一度だけconcatを実行）
+        combined_df = pd.concat(dfs, ignore_index=True)
+
+        # 処理時間のログ
+        end_time = time.time()
+        st.write(f"リーグ戦データロード時間: {end_time - start_time:.2f}秒")
+
+        return combined_df
+
+    except Exception as e:
+        st.error(f"シーズン '{season}' のCSVファイル読み込み中に予期せぬエラーが発生しました: {e}")
+        st.exception(e) # DEBUG 詳細なエラー表示
+        st.write(f"--- load_data_from_trackman_csv_files('{season}') エラー終了 ---") # DEBUG
         return None
 
 # 中間処理結果もキャッシュして再計算を防ぐ
@@ -625,7 +724,7 @@ def display_with_fixed_columns(stats_df, key_column, use_pagination=True, rows_p
 
 # --- 追加：リザルトプロファイル関数（ベクトル化版） ---
 @st.cache_data(ttl=86400)
-def calculate_result_profile_pitcher_vectorized(df, pitcher=None):
+def calculate_result_profile_pitcher_vectorized(df, pitcher=None,gametype="opensen"):
     '''
     リザルトプロファイルのベクトル化バージョン
     球種の順番を ["FastBall","TwoSeamFastBall","Cutter","Slider","Curveball","Splitter","Changeup","Sinker"]
@@ -679,7 +778,7 @@ def calculate_result_profile_pitcher_vectorized(df, pitcher=None):
                     # 各ピッチコールのベクトル化条件
                     is_swinging = df_subset["PitchCall"] == "StrikeSwinging"
                     is_called = df_subset["PitchCall"] == "StrikeCalled"
-                    is_foul = df_subset["PitchCall"] == "FoulBall"
+                    is_foul = df_subset["PitchCall"] in ["FoulBall","FoulBallFieldable","FoulBallNotfieldable"]
                     is_ball = df_subset["PitchCall"] == "BallCalled"
                     is_inplay = df_subset["PitchCall"] == "InPlay"
                     
@@ -1564,6 +1663,306 @@ def player_stats_page(df):
                                         st.write(f"球速: {velo}")
                                         
                                         # 変化量が有効な値であれば表示
+                                        if row['縦変化'] != '-' and row['横変化'] != '-':
+                                            st.write(f"変化量: 縦{row['縦変化']}cm / 横{row['横変化']}cm")
+                        else:
+                            st.warning("球種分析に必要なデータがありません。")
+    else:
+        st.info("選手を選択して分析を開始してください。")
+
+# --- リーグ戦選手成績ページ（修正） ---
+def player_stats_league_page():
+    st.subheader("リーグ戦 選手個人成績")
+
+    with st.expander("使い方"):
+        st.write("1. 分析したい「選手タイプ」（打者 / 投手）を選択してください。")
+        st.write("2. 「選手名」を検索ボックスから選択または入力してください。")
+        st.write("3. 特定の試合データのみを分析したい場合は、「試合日」から日付を選択してください。")
+        st.write("4. 「分析する」ボタンをクリックすると、選手の詳細な成績データが表示されます。")
+
+    # 1. シーズン選択
+    season_dir = 'data_trackman'
+    try:
+        all_items = os.listdir(season_dir)
+        seasons = sorted([d for d in all_items if os.path.isdir(os.path.join(season_dir, d)) and not d.startswith('.')])
+
+    except FileNotFoundError:
+        return
+    except Exception as e:
+        st.error(f"シーズンリストの取得中にエラーが発生しました: {e}")
+        st.exception(e) # DEBUG
+        return
+
+    selected_season = st.selectbox(
+        "シーズンを選択",
+        [""] + seasons,
+        format_func=lambda x: x if x else "シーズンを選択してください",
+        key="league_selected_season"
+    )
+
+
+    if not selected_season:
+        st.info("まずシーズンを選択してください。")
+        return
+
+    # シーズン選択後にデータ読み込み
+
+    with st.spinner(f"シーズン '{selected_season}' のデータを読み込んでいます..."):
+        df = load_data_from_trackman_csv_files(selected_season)
+
+    if df is None:
+
+        return
+    is_empty = df.empty
+
+    if is_empty:
+        st.warning(f"シーズン '{selected_season}' には分析可能なデータが含まれていませんでした。")
+        return
+
+    # 選手タイプ選択
+    player_type = st.radio("選手タイプを選択", ["打者", "投手"], horizontal=True, key="league_player_type")
+
+    # GameLevelフィルタ (リーグ戦ページでは不要かもしれないが、念のため残す)
+    # st.sidebar.subheader("GameLevel (リーグ戦)") # サイドバー項目名を変更
+    # level_filter_league = []
+    # if st.sidebar.checkbox("A", value=True, key="league_player_A"):
+    #     level_filter_league.append("A")
+    # if st.sidebar.checkbox("B", value=True, key="league_player_B"):
+    #     level_filter_league.append("B")
+
+    # if not level_filter_league:
+    #     st.warning("少なくとも一方のGameLevel（A戦またはB戦）を選択してください。")
+    #     return
+
+    # フィルタリング（リーグ戦データにLevel列がない場合は適用しない）
+    # filtered_df = df
+    # if 'Level' in df.columns and level_filter_league:
+    #    filtered_df = df[df["Level"].isin(level_filter_league)]
+    filtered_df = df # リーグ戦データにはLevelがない前提で一旦フィルタリングしない
+
+    # 選手リスト取得
+    player_type_for_list = "batter" if player_type == "打者" else "pitcher"
+    player_list = get_player_list(filtered_df, player_type_for_list)
+
+    # 選手名検索/選択
+    selected_player = st.selectbox(
+        "選手名を選択",
+        [""] + player_list,
+        format_func=lambda x: x if x else "選手を選択してください",
+        key="league_selected_player"
+    )
+
+    if selected_player:
+        # 選手の出場試合日リスト取得
+        game_dates = get_player_game_dates(filtered_df, selected_player, player_type_for_list)
+
+        # 日付選択オプション
+        st.write(f"{selected_player} の出場試合: {len(game_dates)}試合")
+
+        selected_dates = st.multiselect(
+            "特定の試合日を選択 (空欄の場合は全試合が対象)",
+            options=game_dates,
+            format_func=lambda x: x.strftime("%Y-%m-%d") if isinstance(x, date) else str(x),
+            key="league_selected_dates"
+        )
+
+        # 分析実行ボタン
+        analyze_button = st.button("分析する", key="league_analyze_button")
+
+        if analyze_button:
+            with st.spinner(f"{selected_player} の成績を分析中..."):
+                # 日付でフィルタリング
+                player_key = "Batter" if player_type == "打者" else "Pitcher"
+                player_data = filtered_df[filtered_df[player_key] == selected_player]
+                
+                # チームフィルタリング (リーグ戦データにチーム情報がない場合、または形式が異なる場合は調整が必要)
+                if player_key == "Batter" and "BatterTeam" in player_data.columns:
+                     # リーグ戦データでのチーム名に合わせて調整が必要な場合がある
+                    player_data = player_data[player_data["BatterTeam"] == "TOK"] # 仮にTOKとする
+                elif player_key == "Pitcher" and "PitcherTeam" in player_data.columns:
+                    player_data = player_data[player_data["PitcherTeam"] == "TOK"] # 仮にTOKとする
+
+                if selected_dates:
+                    # 選択された日付でフィルタリング
+                    player_data = player_data[player_data["Date"].dt.date.isin(selected_dates)]
+
+                if player_data.empty:
+                    st.warning("選択された条件に一致するデータがありません。")
+                    return
+
+                # タブで表示を分ける
+                tab1, tab2, tab3 = st.tabs(["基本成績", "詳細指標", "球種/球質分析"])
+
+                with tab1:
+                    st.subheader(f"{selected_player} - 基本成績 (リーグ戦)")
+
+                    # 試合数と対戦数の表示
+                    game_count = len(player_data["Date"].dt.date.unique())
+
+                    if player_type == "打者":
+                        # 打者基本成績
+                        batter_stats = compute_batter_stats_optimized(player_data)
+
+                        if not batter_stats.empty:
+                            # 主要成績をハイライト表示
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("試合数", f"{game_count}試合")
+                            with col2:
+                                st.metric("打率", f"{batter_stats['打率'].iloc[0]:.3f}" if not pd.isna(batter_stats['打率'].iloc[0]) else "-")
+                            with col3:
+                                st.metric("OPS", f"{batter_stats['OPS'].iloc[0]:.3f}" if not pd.isna(batter_stats['OPS'].iloc[0]) else "-")
+                            with col4:
+                                st.metric("本塁打", f"{int(batter_stats['本塁打'].iloc[0])}" if not pd.isna(batter_stats['本塁打'].iloc[0]) else "0")
+
+                            # 詳細成績表示
+                            st.write("### 詳細成績")
+                            st.dataframe(batter_stats.T)  # 転置して表示
+                        else:
+                            st.warning("基本成績の計算に必要なデータがありません。")
+
+                    else:  # 投手
+                        # 投手基本成績
+                        pitcher_stats = calculate_stats_pitcher_optimized(player_data)
+
+                        if not pitcher_stats.empty:
+                            # 主要成績をハイライト表示
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("試合数", f"{game_count}試合")
+                            with col2:
+                                st.metric("投球回", f"{pitcher_stats['回'].iloc[0]}")
+                            with col3:
+                                st.metric("奪三振", f"{int(pitcher_stats['K'].iloc[0])}" if not pd.isna(pitcher_stats['K'].iloc[0]) else "0")
+                            with col4:
+                                st.metric("WHIP", f"{pitcher_stats['WHIP'].iloc[0]:.2f}" if not pd.isna(pitcher_stats['WHIP'].iloc[0]) else "-")
+
+                            # 詳細成績表示
+                            st.write("### 詳細成績")
+                            st.dataframe(pitcher_stats)  # 転置せずそのまま表示
+                        else:
+                            st.warning("基本成績の計算に必要なデータがありません。")
+
+                with tab2:
+                    st.subheader(f"{selected_player} - 詳細指標 ({selected_season})") # シーズン情報追加
+
+                    # 詳細成績の計算と表示
+                    # compute_player_performance_details は player_data (日付フィルタ後) を使う
+                    player_details = compute_player_performance_details(player_data, selected_player, player_type_for_list)
+
+                    if not player_details.empty:
+                        if player_type == "打者":
+                            # ... (打者詳細指標の表示ロジックは変更なし) ...
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+                                st.write("#### 打撃結果")
+                                hit_data = {
+                                    "単打": player_details.get("PlayResult_Single", 0),
+                                    "二塁打": player_details.get("PlayResult_Double", 0),
+                                    "三塁打": player_details.get("PlayResult_Triple", 0),
+                                    "本塁打": player_details.get("PlayResult_HomeRun", 0),
+                                    "四球": player_details.get("KorBB_Walk", 0),
+                                    "三振": player_details.get("KorBB_Strikeout", 0),
+                                }
+                                st.dataframe(pd.Series(hit_data))
+
+                            with col2:
+                                st.write("#### 打球タイプ")
+                                hit_type_data = {
+                                    "ゴロ": player_details.get("HitType_GroundBall", 0),
+                                    "ライナー": player_details.get("HitType_LineDrive", 0),
+                                    "フライ": player_details.get("HitType_FlyBall", 0),
+                                    "ポップ": player_details.get("HitType_PopUp", 0),
+                                    "バント": player_details.get("HitType_Bunt", 0),
+                                }
+                                st.dataframe(pd.Series(hit_type_data))
+
+                            st.write("#### 打球データ")
+                            batted_ball_data = {
+                                "平均打球速度": player_details.get("Avg_ExitSpeed", "-"),
+                                "最大打球速度": player_details.get("Max_ExitSpeed", "-"),
+                                "平均打球角度": player_details.get("Avg_Angle", "-"),
+                            }
+                            st.dataframe(pd.Series(batted_ball_data))
+
+                        else:  # 投手
+                            # 投手詳細指標
+                            st.write("#### 球種別詳細指標")
+                            # calculate_result_profile_pitcher_vectorized も player_data を使う
+                            data = calculate_result_profile_pitcher_vectorized(player_data, pitcher=selected_player)
+                            st.dataframe(data) # リーグ戦用に関数名変更の必要があれば修正
+
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+                                st.write("#### 投球結果")
+                                # 投球結果ごとのカウント
+                                pitch_data = {
+                                    "被安打": player_details.get("PlayResult_Single", 0) + player_details.get("PlayResult_Double", 0) +
+                                            player_details.get("PlayResult_Triple", 0) + player_details.get("PlayResult_HomeRun", 0),
+                                    "被本塁打": player_details.get("PlayResult_HomeRun", 0),
+                                    "奪三振": player_details.get("KorBB_Strikeout", 0),
+                                    "四球": player_details.get("KorBB_Walk", 0),
+                                    "空振り": player_details.get("PitchCall_StrikeSwinging", 0),
+                                    "見逃し": player_details.get("PitchCall_StrikeCalled", 0),
+                                }
+                                st.dataframe(pd.Series(pitch_data))
+
+                            with col2:
+                                st.write("#### 被打球タイプ")
+                                # 被打球タイプごとのカウント
+                                hit_type_data = {
+                                    "ゴロ": player_details.get("HitType_GroundBall", 0),
+                                    "ライナー": player_details.get("HitType_LineDrive", 0),
+                                    "フライ": player_details.get("HitType_FlyBall", 0),
+                                    "ポップ": player_details.get("HitType_PopUp", 0),
+                                }
+                                st.dataframe(pd.Series(hit_type_data))
+                    else:
+                        st.warning("詳細指標の計算に必要なデータがありません。")
+
+                with tab3:
+                    st.subheader(f"{selected_player} - 球種/球質分析 ({selected_season})") # シーズン情報追加
+
+                    # 高度な指標の計算と表示
+                    # compute_advanced_metrics も player_data を使う
+                    advanced_metrics = compute_advanced_metrics(player_data, selected_player, player_type_for_list)
+
+                    if player_type == "打者":
+                        if isinstance(advanced_metrics, pd.Series) and not advanced_metrics.empty:
+                            st.write("#### 打球品質指標")
+                            st.dataframe(advanced_metrics)
+                        else:
+                            st.warning("球質分析に必要なデータがありません。")
+                    else:  # 投手
+                        if isinstance(advanced_metrics, pd.DataFrame) and not advanced_metrics.empty:
+                            st.write("#### 球種別指標")
+                            st.dataframe(advanced_metrics)
+
+                            # 主要球種のハイライト表示
+                            pitch_types = advanced_metrics[advanced_metrics['球種'] != '全体']
+
+                            if not pitch_types.empty:
+                                st.write("#### 主要球種")
+
+                                # 使用率トップ3の球種を表示
+                                top_pitches = pitch_types.sort_values('球数', ascending=False).head(3)
+
+                                col1, col2, col3 = st.columns(3)
+                                for i, (idx, row) in enumerate(top_pitches.iterrows()):
+                                    with [col1, col2, col3][i]:
+                                        pitch_name = row['球種']
+                                        # '全体'の球数が存在するか確認
+                                        overall_pitches = advanced_metrics[advanced_metrics['球種'] == '全体']['球数']
+                                        if not overall_pitches.empty and overall_pitches.iloc[0] > 0:
+                                            usage_pct = round(row['球数'] / overall_pitches.iloc[0] * 100, 1)
+                                        else:
+                                            usage_pct = 0.0 # 全体の球数が0または存在しない場合
+                                        velo = row['球速'] if row['球速'] != '-' else '--'
+                                        st.write(f"**{pitch_name}**")
+                                        st.write(f"使用率: {usage_pct}%")
+                                        st.write(f"球速: {velo}")
                                         if row['縦変化'] != '-' and row['横変化'] != '-':
                                             st.write(f"変化量: 縦{row['縦変化']}cm / 横{row['横変化']}cm")
                         else:
