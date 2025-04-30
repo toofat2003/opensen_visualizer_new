@@ -1820,7 +1820,7 @@ def player_stats_league_page():
                 #if player_key == "Batter" and "BatterTeam" in player_data.columns:
                  #    # リーグ戦データでのチーム名に合わせて調整が必要な場合がある
                   #  player_data = player_data[player_data["BatterTeam"] == "TOK"] # 仮にTOKとする
-                #elif player_key == "Pitcher" and "PitcherTeam" in player_data.columns:
+                #elif player_key == "Pitcher" and "PitcherTeam" in player_data.columns:っd
                  #   player_data = player_data[player_data["PitcherTeam"] == "TOK"] # 仮にTOKとする
 
                 if selected_dates:
